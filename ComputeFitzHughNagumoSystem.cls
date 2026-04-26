@@ -1,0 +1,74 @@
+' ============================================================
+' Class Module: ComputeFitzHughNagumoSystem.cls
+' Version : BIOLOGICAL v1.2 - 2026-04-15
+' FitzHugh-Nagumo Excitable Media on GPU
+' ============================================================
+
+Option Explicit
+
+Private m_GridSSBO(0 To 1) As Long
+Private m_CurrentRead As Long
+Private m_GridWidth As Long
+Private m_GridHeight As Long
+Private m_Program As Long
+
+Public a As Single
+Public b As Single
+Public epsilon As Single
+Public DiffusionU As Single
+Public DiffusionV As Single
+
+Public Sub Initialize(ByVal width As Long, ByVal height As Long)
+    m_GridWidth = width
+    m_GridHeight = height
+    m_CurrentRead = 0
+    
+    a = 0.13
+    b = 0.013
+    epsilon = 0.05
+    DiffusionU = 0.1
+    DiffusionV = 0.05
+    
+    GL.glGenBuffers 2, m_GridSSBO(0)
+    Dim i As Long
+    For i = 0 To 1
+        GL.glBindBuffer GL.GL_SHADER_STORAGE_BUFFER, m_GridSSBO(i)
+        GL.glBufferData GL.GL_SHADER_STORAGE_BUFFER, width * height * 8, ByVal 0&, GL.GL_DYNAMIC_DRAW
+    Next i
+    
+    m_Program = ShaderProgram.CreateComputeProgram(EmbeddedShaders.GetFitzHughNagumoShader())
+    InitializeExcitableGrid
+End Sub
+
+Public Sub Update(ByVal deltaTime As Single)
+    Dim readIdx As Long, writeIdx As Long
+    readIdx = m_CurrentRead
+    writeIdx = 1 - m_CurrentRead
+    
+    GL.glBindBufferBase GL.GL_SHADER_STORAGE_BUFFER, 0, m_GridSSBO(readIdx)
+    GL.glBindBufferBase GL.GL_SHADER_STORAGE_BUFFER, 1, m_GridSSBO(writeIdx)
+    
+    GL.glUseProgram m_Program
+    GL.glUniform1f GL.glGetUniformLocation(m_Program, "deltaTime"), deltaTime
+    GL.glUniform1f GL.glGetUniformLocation(m_Program, "a"), a
+    GL.glUniform1f GL.glGetUniformLocation(m_Program, "b"), b
+    GL.glUniform1f GL.glGetUniformLocation(m_Program, "epsilon"), epsilon
+    GL.glUniform1f GL.glGetUniformLocation(m_Program, "diffusionU"), DiffusionU
+    GL.glUniform1f GL.glGetUniformLocation(m_Program, "diffusionV"), DiffusionV
+    GL.glUniform1i GL.glGetUniformLocation(m_Program, "gridWidth"), m_GridWidth
+    GL.glUniform1i GL.glGetUniformLocation(m_Program, "gridHeight"), m_GridHeight
+    
+    GL.glDispatchCompute (m_GridWidth + 15) \ 16, (m_GridHeight + 15) \ 16, 1
+    GL.glMemoryBarrier GL.GL_SHADER_STORAGE_BARRIER_BIT
+    
+    m_CurrentRead = writeIdx
+End Sub
+
+Public Function GetCurrentGridSSBO() As Long
+    GetCurrentGridSSBO = m_GridSSBO(m_CurrentRead)
+End Function
+
+Public Sub Shutdown()
+    GL.glDeleteBuffers 2, m_GridSSBO(0)
+    If m_Program <> 0 Then GL.glDeleteProgram m_Program
+End Sub
